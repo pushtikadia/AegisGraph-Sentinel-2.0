@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 # API Configuration
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8080"
 
 # Custom CSS
 st.markdown("""
@@ -1365,7 +1365,7 @@ elif page == "ℹ️ About System":
     
     #### 📚 Documentation
     
-    - Interactive API Docs: http://localhost:8000/docs
+    - Interactive API Docs: http://localhost:8080/docs
     - Innovations Guide: See INNOVATIONS.md
     - Project README: See README.md
     - Deployment Guide: See DEPLOYMENT.md
