@@ -1,0 +1,15 @@
+torch
+torch-geometric
+networkx
+numpy
+pandas
+fastapi
+uvicorn
+pydantic
+pyyaml
+python-dotenv
+slowapi
+mlflow
+pytest
+pytest-cov
+httpx
