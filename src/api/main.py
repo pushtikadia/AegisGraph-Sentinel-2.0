@@ -12,6 +12,7 @@ Real-time fraud detection API service
 import logging
 logger = logging.getLogger(__name__)
 import hashlib
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -1383,7 +1384,12 @@ async def check_batch_transactions(request: BatchTransactionRequest):
             continue
 
         results.append(result)
-        stats[result.decision.upper()] += 1
+        decision_key = str(result.decision).upper()
+        if decision_key == "APPROVE":
+            decision_key = "ALLOW"
+        if decision_key not in stats:
+            decision_key = "ALLOW"
+        stats[decision_key] += 1
     
     processing_time_ms = (time.time() - start_time) * 1000
     
