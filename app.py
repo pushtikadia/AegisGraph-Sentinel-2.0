@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime
 from datetime import timezone
 import time
 import os
@@ -89,8 +89,7 @@ st.markdown("""
         backdrop-filter: blur(10px) !important;
         box-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.3) !important;
     }
-    
-    /* Micro-animations and active elements */
+     /* Micro-animations and active elements */
     button[kind="primary"] {
         background: linear-gradient(135deg, #0f766e 0%, #0284c7 100%) !important;
         border: none !important;
@@ -98,9 +97,50 @@ st.markdown("""
         color: white !important;
         font-weight: 600 !important;
         padding: 10px 24px !important;
-        box-shadow: 0 4px 15px rgba(045, 212,191, 0.3) !important;
-        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        transition: all 0.3s ease !important;
     }
+    
+    /* Alert Center Styling */
+    .alert-card {
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        animation: slideIn 0.3s ease-out forwards;
+        transition: transform 0.2s;
+    }
+    .alert-card:hover {
+        transform: translateX(5px);
+        background: rgba(30, 41, 59, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateX(-20px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    .severity-badge {
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .severity-Low { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+    .severity-Medium { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
+    .severity-High { background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316; }
+    .severity-Critical { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; animation: pulse 2s infinite; }
+    @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .alert-time { font-family: monospace; color: #94a3b8; font-size: 0.85rem; }
+    .alert-title { font-weight: 600; color: #f1f5f9; margin: 0 12px; flex-grow: 1; }
     
     button[kind="primary"]:hover {
         transform: scale(1.03);
@@ -1029,50 +1069,7 @@ elif page == "📊 Risk Analytics":
     st.markdown("---")
     
     with st.expander("🚨 Realtime Fraud Alert Center", expanded=True):
-        st.markdown("""
-        <style>
-        .alert-card {
-            background: rgba(30, 41, 59, 0.7);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin-bottom: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            animation: slideIn 0.3s ease-out forwards;
-            transition: transform 0.2s;
-        }
-        .alert-card:hover {
-            transform: translateX(5px);
-            background: rgba(30, 41, 59, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateX(-20px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        .severity-badge {
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        .severity-Low { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
-        .severity-Medium { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
-        .severity-High { background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316; }
-        .severity-Critical { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; animation: pulse 2s infinite; }
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-        .alert-time { font-family: monospace; color: #94a3b8; font-size: 0.85rem; }
-        .alert-title { font-weight: 600; color: #f1f5f9; margin: 0 12px; flex-grow: 1; }
-        </style>
-        """, unsafe_allow_html=True)
+
         
         # Initialize alerts
         if 'realtime_alerts' not in st.session_state:
@@ -1104,10 +1101,8 @@ elif page == "📊 Risk Analytics":
                 "title": np.random.choice(titles[sev]),
                 "category": categories[sev]
             }
-            st.session_state.realtime_alerts.insert(0, new_alert)
-            # Keep max 50
-            if len(st.session_state.realtime_alerts) > 50:
-                st.session_state.realtime_alerts.pop()
+            # Prepend and keep max 50 alerts safely
+            st.session_state.realtime_alerts = [new_alert] + st.session_state.realtime_alerts[:49]
                 
         # Filters UI
         filter_col1, filter_col2 = st.columns([2, 1])
