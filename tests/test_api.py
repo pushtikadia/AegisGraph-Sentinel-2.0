@@ -57,7 +57,7 @@ class TestFraudCheckEndpoint:
         transaction = {
             "transaction_id": "test_001",
             "amount": 50.0,
-            "timestamp": 1234567890.0,
+            "timestamp": 1779883200.0,
             "from_account": "user_1",
             "to_account": "merchant_1",
             "transaction_type": "payment",
@@ -90,7 +90,7 @@ class TestFraudCheckEndpoint:
         transaction = {
             "transaction_id": "test_002",
             "amount": 10000.0,
-            "timestamp": 1234567890.0,
+            "timestamp": 1779883200.0,
             "from_account": "new_user",
             "to_account": "unknown_merchant",
             "transaction_type": "transfer",
@@ -115,7 +115,7 @@ class TestFraudCheckEndpoint:
         transaction = {
             "transaction_id": "test_003",
             "amount": 100.0,
-            "timestamp": 1234567890.0,
+            "timestamp": 1779883200.0,
             "from_account": "user_1",
             "to_account": "merchant_1",
             "transaction_type": "payment",
@@ -155,7 +155,7 @@ class TestFraudCheckEndpoint:
         transaction = {
             "transaction_id": "test_allow_001",
             "amount": 100.0,
-            "timestamp": 1234567890.0,
+            "timestamp": 1779883200.0,
             "from_account": "user_allow",
             "to_account": "merchant_allow",
             "transaction_type": "payment"
@@ -215,7 +215,7 @@ class TestBatchFraudCheck:
             {
                 "transaction_id": "batch_allow",
                 "amount": 50.0,
-                "timestamp": 1234567890.0,
+                "timestamp": 1779883200.0,
                 "from_account": "user_allow",
                 "to_account": "merchant_allow",
                 "transaction_type": "payment",
@@ -223,7 +223,7 @@ class TestBatchFraudCheck:
             {
                 "transaction_id": "batch_review",
                 "amount": 75.0,
-                "timestamp": 1234567950.0,
+                "timestamp": 1779883260.0,
                 "from_account": "user_review",
                 "to_account": "merchant_review",
                 "transaction_type": "payment",
@@ -231,7 +231,7 @@ class TestBatchFraudCheck:
             {
                 "transaction_id": "batch_block",
                 "amount": 100.0,
-                "timestamp": 1234568010.0,
+                "timestamp": 1779883320.0,
                 "from_account": "user_block",
                 "to_account": "merchant_block",
                 "transaction_type": "payment",
@@ -253,7 +253,7 @@ class TestBatchFraudCheck:
             {
                 "transaction_id": f"batch_{i}",
                 "amount": 50.0 * (i + 1),
-                "timestamp": 1234567890.0 + i * 60,
+                "timestamp": 1779883200.0 + i * 60,
                 "from_account": f"user_{i}",
                 "to_account": f"merchant_{i}",
                 "transaction_type": "payment"
@@ -314,7 +314,7 @@ class TestBatchFraudCheck:
             {
                 "transaction_id": f"batch_{i}",
                 "amount": 50.0 * (i + 1),
-                "timestamp": 1234567890.0 + i * 60,
+                "timestamp": 1779883200.0 + i * 60,
                 "from_account": f"user_{i}",
                 "to_account": f"merchant_{i}",
                 "transaction_type": "payment",
