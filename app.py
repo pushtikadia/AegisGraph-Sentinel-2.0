@@ -2394,8 +2394,28 @@ elif page == "🕸️ Network Graph Explorer":
     <body>
         <div id="network-canvas"></div>
         <script type="text/javascript">
-            var nodes = new vis.DataSet({nodes_json});
-            var edges = new vis.DataSet({edges_json});
+            var nodesRaw = {nodes_json};
+            var edgesRaw = {edges_json};
+
+            // Convert raw HTML title strings into actual DOM elements so vis.js renders them as HTML
+            nodesRaw.forEach(function(node) {{
+                if (node.title) {{
+                    var el = document.createElement("div");
+                    el.innerHTML = node.title;
+                    node.title = el;
+                }}
+            }});
+
+            edgesRaw.forEach(function(edge) {{
+                if (edge.title) {{
+                    var el = document.createElement("div");
+                    el.innerHTML = edge.title;
+                    edge.title = el;
+                }}
+            }});
+
+            var nodes = new vis.DataSet(nodesRaw);
+            var edges = new vis.DataSet(edgesRaw);
 
             var container = document.getElementById('network-canvas');
             var data = {{
