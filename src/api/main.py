@@ -75,7 +75,7 @@ from ..config.settings import get_settings
 from ..config.validation import validate_environment
 from ..exceptions import register_exception_handlers, register_observability_middleware
 from ..observability import get_audit_logger, get_logger
-from ..runtime import LifecycleManager, RuntimeState
+from ..runtime import LifecycleManager, RuntimeState, RecoveryManager, RuntimeWatchdog
 from ..runtime.background_tasks import honeypot_auto_release_loop
 from .schemas import (
     AccountOpeningRequest,
@@ -194,8 +194,12 @@ def _require_verbose_health_access(
 
 
 def _build_health_response(include_details: bool) -> dict[str, Any]:
+    overall_status = "healthy"
+    if hasattr(state, "runtime") and hasattr(state.runtime, "health_monitor"):
+        overall_status = state.runtime.health_monitor.get_overall_status()
+
     response: dict[str, Any] = {
-        "status": "healthy",
+        "status": overall_status,
         "service": "AegisGraph Sentinel",
     }
 
@@ -214,6 +218,20 @@ def _build_health_response(include_details: bool) -> dict[str, Any]:
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
     )
+
+    if hasattr(state, "runtime") and hasattr(state.runtime, "health_monitor"):
+        snapshot = state.runtime.health_monitor.get_health_snapshot()
+        response["services_health"] = {
+            name: {
+                "status": sh.status,
+                "failures": sh.failures,
+                "restart_attempts": sh.restart_attempts,
+                "last_error": sh.last_error,
+                "last_heartbeat": sh.last_heartbeat,
+            }
+            for name, sh in snapshot.items()
+        }
+
     return response
 from ..exceptions import register_exception_handlers, register_observability_middleware
 from ..observability import get_audit_logger, get_logger
@@ -590,6 +608,335 @@ except (ImportError, SyntaxError) as e:
         event_type="innovation_import_fallback",
     )
     LATERAL_MOVEMENT_AVAILABLE = False
+       
+    # Demo mode functions
+    def compute_risk_score(transaction: dict, biometrics: dict = None, **kwargs) -> dict:
+        """Enhanced risk scorer with graph-based mule account detection"""
+        risk_score = 0.0
+        breakdown = {
+            'graph': 0.0,
+            'velocity': 0.0,
+            'behavior': 0.0,
+            'entropy': 0.0,
+        }
+        
+        source_account = transaction.get('source_account')
+        target_account = transaction.get('target_account')
+        amount = transaction.get('amount', 0)
+        
+        # 1. GRAPH-BASED RISK (50% weight)
+        graph_risk = 0.0
+        
+        if state.graph_loaded and state.transaction_graph:
+            # Check if accounts are in known fraud chains
+            if source_account in state.mule_accounts:
+                graph_risk += 0.6
+                _api_logger.warning(
+                    f"Source account {source_account} is a known mule account",
+                    event_type="mule_account_detected",
+                    metadata={"account": source_account, "role": "source"},
+                )
+            if target_account in state.mule_accounts:
+                graph_risk += 0.4
+                _api_logger.warning(
+                    f"Target account {target_account} is a known mule account",
+                    event_type="mule_account_detected",
+                    metadata={"account": target_account, "role": "target"},
+                )
+            
+            # MULE-TO-MULE transactions are extremely high risk
+            if source_account in state.mule_accounts and target_account in state.mule_accounts:
+                graph_risk += 0.3  # Additional penalty for mule-to-mule
+                _api_logger.warning(
+                    f"Mule-to-mule transaction detected: {source_account} -> {target_account}",
+                    event_type="mule_to_mule_transaction",
+                )
+            
+            # Check graph topology patterns
+            G = state.transaction_graph
+            
+            if source_account is not None and source_account in G:
+                # Analyze source account patterns
+                out_degree = G.out_degree(source_account)
+                in_degree = G.in_degree(source_account)
+                
+                # STAR PATTERN: High out-degree (distribution hub)
+                if out_degree > 20:
+                    graph_risk += 0.3
+                    _api_logger.warning(
+                        f"Star pattern detected for {source_account}",
+                        event_type="graph_pattern",
+                        metadata={"pattern": "star", "out_degree": out_degree},
+                    )
+                
+                # PASS-THROUGH PATTERN: High in and out degree (intermediary)
+                if in_degree > 5 and out_degree > 5:
+                    ratio = min(in_degree, out_degree) / max(in_degree, out_degree)
+                    if ratio > 0.8:  # Balanced in/out suggests pass-through
+                        graph_risk += 0.25
+                        _api_logger.warning(
+                            f"Pass-through pattern for {source_account}",
+                            event_type="graph_pattern",
+                            metadata={"pattern": "pass_through", "in_degree": in_degree, "out_degree": out_degree},
+                        )
+                
+                # Check if part of a chain (linear path pattern) - LIMITED DEPTH FOR PERFORMANCE
+                try:
+                    initial_successors = list(G.successors(source_account))
+                    if 1 <= len(initial_successors) <= 2:
+                        # Check for sequential chain pattern (max 10 hops)
+                        chain_length = 0
+                        current = source_account
+                        visited = set()
+                        max_depth = 10  # Prevent long searches
+
+                        while current not in visited and chain_length < max_depth:
+                            visited.add(current)
+                            successors = list(G.successors(current))
+                            if 1 <= len(successors) <= 2:
+                                next_node = successors[0]
+                                if next_node in visited:
+                                    break
+                                chain_length += 1
+                                current = next_node
+                            else:
+                                break
+
+                        if chain_length >= 3:
+                            graph_risk += 0.2
+                            _api_logger.warning(
+                                f"Chain pattern for {source_account}",
+                                event_type="graph_pattern",
+                                metadata={"pattern": "chain", "chain_length": chain_length},
+                            )
+                except Exception as exc:
+                    _api_logger.warning(
+                        f"Graph pattern analysis failed for {source_account}: {exc}",
+                        event_type="graph_pattern_analysis_error",
+                        metadata={
+                            "source_account": source_account,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+        
+        graph_risk = min(graph_risk, 1.0)
+        breakdown['graph'] = graph_risk
+        
+        # 2. VELOCITY RISK (20% weight)
+        velocity_risk = 0.0
+        
+        # Large transaction amount - ESCALATED for extreme amounts (lowered for demo)
+        if amount > 100000:
+            velocity_risk += 0.7
+        elif amount > 50000:
+            velocity_risk += 0.5
+        elif amount > 20000:
+            velocity_risk += 0.3
+        elif amount > 5000:
+            velocity_risk += 0.1
+        
+        # Check account profile for velocity patterns
+        if source_account in state.account_profiles:
+            profile = state.account_profiles[source_account]
+            avg_amount = profile.get('avg_transaction_amount', 5000)
+            if amount > avg_amount * 3:
+                velocity_risk += 0.3
+                _api_logger.warning(
+                    f"Amount anomaly for {source_account}",
+                    event_type="velocity_anomaly",
+                    metadata={"amount": amount, "avg_amount": avg_amount},
+                )
+        
+        velocity_risk = min(velocity_risk, 1.0)
+        breakdown['velocity'] = velocity_risk
+        
+        # 3. BEHAVIORAL RISK (20% weight)
+        behavior_risk = 0.0
+        
+        if biometrics:
+            # Analyze typing patterns for stress indicators
+            hold_times = biometrics.get('hold_times', [])
+            flight_times = biometrics.get('flight_times', [])
+            
+            if hold_times:
+                avg_hold = np.mean(hold_times)
+                std_hold = np.std(hold_times)
+                
+                # Longer hold times suggest hesitation/stress
+                if avg_hold > 150:
+                    behavior_risk += 0.3
+                
+                # High variance suggests irregular typing
+                if std_hold > 50:
+                    behavior_risk += 0.2
+            
+            if flight_times:
+                avg_flight = np.mean(flight_times)
+                
+                # Very fast typing could be automated
+                if avg_flight < 100:
+                    behavior_risk += 0.3
+                # Very slow could indicate coercion
+                elif avg_flight > 300:
+                    behavior_risk += 0.2
+        
+        behavior_risk = min(behavior_risk, 1.0)
+        breakdown['behavior'] = behavior_risk
+        
+        # 4. ENTROPY RISK (10% weight)
+        entropy_risk = 0.0
+        
+        # Time-based anomalies (simplified)
+        hour = datetime.now(timezone.utc).hour
+        if hour >= 2 and hour <= 5:  # Late night transactions
+            entropy_risk += 0.4
+        
+        # Round amounts are suspicious (structuring) - lowered for demo
+        if amount % 1000 == 0 and amount >= 5000:
+            entropy_risk += 0.3
+        
+        entropy_risk = min(entropy_risk, 1.0)
+        breakdown['entropy'] = entropy_risk
+        
+        # WEIGHTED FINAL RISK SCORE
+        risk_score = (
+            graph_risk * 0.50 +
+            velocity_risk * 0.20 +
+            behavior_risk * 0.20 +
+            entropy_risk * 0.10
+        )
+        
+        # CRITICAL RISK MULTIPLIER: Boost score when multiple severe factors present
+        critical_factors = 0
+        if graph_risk >= 0.6:  # Known mule or severe pattern
+            critical_factors += 1
+        if velocity_risk >= 0.5:  # Very high amount
+            critical_factors += 1
+        if entropy_risk >= 0.4:  # Late night or structuring
+            critical_factors += 1
+        
+        # Apply multiplier for combined risk factors
+        if critical_factors >= 3:
+            risk_score = min(risk_score * 1.6, 1.0)  # 60% boost for 3+ critical factors
+            _api_logger.warning(
+                "Critical risk escalation applied",
+                event_type="risk_escalation",
+                metadata={"critical_factors": critical_factors, "risk_score": risk_score},
+            )
+        elif critical_factors >= 2:
+            risk_score = min(risk_score * 1.3, 1.0)  # 30% boost for 2 critical factors
+            _api_logger.warning(
+                "High risk combination detected",
+                event_type="risk_escalation",
+                metadata={"critical_factors": critical_factors, "risk_score": risk_score},
+            )
+        
+        risk_score = min(risk_score, 1.0)
+        
+        # Determine decision based on thresholds
+        if risk_score >= 0.70:
+            decision = "BLOCK"
+        elif risk_score >= 0.40:
+            decision = "REVIEW"
+        else:
+            decision = "ALLOW"
+        
+        # Calculate confidence based on available data
+        confidence = 0.7
+        if state.graph_loaded:
+            confidence += 0.15
+        if biometrics:
+            confidence += 0.10
+        if source_account in state.account_profiles:
+            confidence += 0.05
+        
+        confidence = min(confidence, 0.95)
+        
+        return {
+            'risk_score': risk_score,
+            'decision': decision,
+            'confidence': confidence,
+            'breakdown': breakdown,
+        }
+    
+    def generate_explanation(transaction: dict = None, risk_result: dict = None, detail_level: str = 'medium', **kwargs) -> dict:
+        """Enhanced explainer with detailed fraud pattern descriptions"""
+        if not risk_result or 'risk_score' not in risk_result:
+            return {
+                'explanation': "Unable to generate explanation",
+                'recommended_action': "Unable to determine action"
+            }
+            
+        risk_score = risk_result['risk_score']
+        breakdown = risk_result.get('breakdown', {})
+        decision = risk_result.get('decision', 'UNKNOWN')
+        
+        # Build detailed explanation
+        explanations = []
+        
+        # Check graph risk
+        if breakdown.get('graph', 0) > 0.5:
+            explanations.append("🚨 HIGH GRAPH RISK: Account involved in known fraud network or displays mule account patterns")
+        elif breakdown.get('graph', 0) > 0.3:
+            explanations.append("⚠️ MODERATE GRAPH RISK: Suspicious network topology detected (star/chain/pass-through pattern)")
+        
+        # Check velocity risk
+        if breakdown.get('velocity', 0) > 0.5:
+            explanations.append("💰 HIGH VELOCITY RISK: Unusual transaction amount or frequency pattern")
+        elif breakdown.get('velocity', 0) > 0.3:
+            explanations.append("📊 VELOCITY ANOMALY: Transaction amount deviates from account history")
+        
+        # Check behavioral risk
+        if breakdown.get('behavior', 0) > 0.5:
+            explanations.append("👤 BEHAVIORAL RED FLAG: Keystroke analysis indicates stress or coercion")
+        elif breakdown.get('behavior', 0) > 0.3:
+            explanations.append("⌨️ BEHAVIORAL WARNING: Unusual typing patterns detected")
+        
+        # Check entropy risk
+        if breakdown.get('entropy', 0) > 0.4:
+            explanations.append("🔍 ENTROPY ANOMALY: Suspicious timing or amount structuring detected")
+        
+        if not explanations:
+            if risk_score < 0.3:
+                explanation = "✅ LOW RISK: Transaction appears legitimate with normal patterns"
+            else:
+                explanation = "⚡ MODERATE RISK: Some minor anomalies detected, but within acceptable range"
+        else:
+            explanation = " | ".join(explanations)
+        
+        # Recommended action
+        if decision == "BLOCK":
+            action = "REJECT TRANSACTION: High fraud probability - immediate intervention required"
+        elif decision == "REVIEW":
+            action = "MANUAL REVIEW: Flag for analyst investigation before approval"
+        else:
+            action = "ALLOW: Transaction cleared for processing"
+        
+        # Add account-specific warnings
+        if transaction:
+            source = transaction.get('source_account')
+            target = transaction.get('target_account')
+            
+            if source in state.mule_accounts:
+                explanation += f" | 🎯 SOURCE ACCOUNT ({source}) IS A KNOWN MULE ACCOUNT"
+            if target in state.mule_accounts:
+                explanation += f" | 🎯 TARGET ACCOUNT ({target}) IS A KNOWN MULE ACCOUNT"
+        
+        return {
+            'explanation': explanation,
+            'recommended_action': action
+        }
+
+
+try:
+    from ..features.lateral_movement import LateralMovementDetector
+    LATERAL_MOVEMENT_AVAILABLE = True
+except (ImportError, SyntaxError) as e:
+    _api_logger.warning(
+        f"Lateral movement module not available ({e})",
+        event_type="lateral_movement_import_fallback",
+    )
+    LATERAL_MOVEMENT_AVAILABLE = False
     LateralMovementDetector = None
 
 
@@ -684,7 +1031,9 @@ async def _honeypot_auto_release_loop(interval_seconds: int = 60):
         lambda: state.services.optional_get("honeypot_manager"),
         interval_seconds=interval_seconds,
         logger=_api_logger,
+        health_monitor=state.runtime.health_monitor,
     )
+
 
 
 def _startup_banner():
@@ -727,61 +1076,104 @@ def _read_json_file(path: Path):
 
 async def _load_graph_runtime_data(startup_logger):
     try:
-        # === SECURE GRAPH LOADING ===
-        runtime_settings = state.settings
-        graph_candidates = [
-            runtime_settings.graph.graph_path
-            if runtime_settings.raw_environment.aegis_graph_path
-            else None,
-            runtime_settings.graph.graph_path,
-        ]
-        graph_path = next((path for path in graph_candidates if path and path.exists()), None)
-        
-        EXPECTED_GRAPH_SHA256 = runtime_settings.graph.graph_sha256
-        
-        if graph_path:
-            file_bytes = await asyncio.to_thread(_read_file_bytes, graph_path)
-            actual_hash = hashlib.sha256(file_bytes).hexdigest()
-            
-            if not EXPECTED_GRAPH_SHA256:
-                raise RuntimeError(
-                    "Critical Security Alert: AEGIS_GRAPH_SHA256 env var is unset. "
-                    "Halting boot to prevent loading an unverified graph artifact."
-                )
-            if actual_hash != EXPECTED_GRAPH_SHA256:
-                raise RuntimeError(
-                    f"Critical Security Alert: {graph_path} hash mismatch. Halting boot.\n"
-                    f"Expected: {EXPECTED_GRAPH_SHA256}\n"
-                    f"Actual:   {actual_hash}"
-                )
-            
-            if graph_path.suffix.lower() != ".graphml":
-                raise ValueError(
-                    f"Unsupported graph artifact format: {graph_path.suffix}. "
-                    "Only .graphml is accepted."
-                )
-            state.transaction_graph = nx.parse_graphml(file_bytes.decode("utf-8"))
-            startup_logger.info(
-                "Loaded transaction graph",
-                event_type="graph_loaded",
-                metadata={
-                    "path": str(graph_path),
-                    "nodes": state.transaction_graph.number_of_nodes(),
-                    "edges": state.transaction_graph.number_of_edges(),
-                },
+        # === NEO4J DATABASE INITIALIZATION ===
+        db_config = state.config.get("database", {})
+        neo4j_config = db_config.get("neo4j", {})
+        neo4j_enabled = neo4j_config.get("enabled", False)
+
+        env_uri = os.getenv("AEGIS_NEO4J_URI") or os.getenv("NEO4J_URI")
+        env_user = os.getenv("AEGIS_NEO4J_USER") or os.getenv("NEO4J_USER")
+        env_password = os.getenv("AEGIS_NEO4J_PASSWORD") or os.getenv("NEO4J_PASSWORD")
+        env_enabled = os.getenv("AEGIS_NEO4J_ENABLED")
+
+        if env_enabled is not None:
+            neo4j_enabled = env_enabled.lower() == "true"
+
+        if neo4j_enabled:
+            uri = env_uri or neo4j_config.get("uri", "bolt://localhost:7687")
+            user = env_user or neo4j_config.get("user", "neo4j")
+            password = env_password or neo4j_config.get("password", "password")
+
+            from ..core.providers.neo4j import Neo4jGraphProvider
+
+            provider = Neo4jGraphProvider(
+                uri=uri,
+                user=user,
+                password=password,
+                enabled=True,
             )
-            print(f"✓ Loaded verified transaction graph: {state.transaction_graph.number_of_nodes()} nodes, "
-                  f"{state.transaction_graph.number_of_edges()} edges")
-            state.graph_loaded = True
-        else:
-            startup_logger.warning(
-                "Graph file not found at data/synthetic/graph.graphml",
-                event_type="graph_missing",
-            )
-            print("⚠ Graph file not found at data/synthetic/graph.graphml")
-        
-        if not graph_path:
-            state.graph_loaded = False
+
+            if provider.is_active:
+                state.transaction_graph = provider
+                state.graph_loaded = True
+                startup_logger.info(
+                    "Initialized active Neo4j database connection pool",
+                    event_type="neo4j_initialized",
+                    metadata={"uri": uri, "user": user},
+                )
+                print(f"✓ Initialized active Neo4j database integration: {provider.number_of_nodes} nodes, {provider.number_of_edges} edges")
+            else:
+                startup_logger.warning(
+                    "Neo4j enabled but connection failed. Falling back to static graph files.",
+                    event_type="neo4j_fallback",
+                )
+
+        # === SECURE GRAPH LOADING (Fallback) ===
+        if not state.graph_loaded:
+            runtime_settings = state.settings
+            graph_candidates = [
+                runtime_settings.graph.graph_path
+                if runtime_settings.raw_environment.aegis_graph_path
+                else None,
+                runtime_settings.graph.graph_path,
+            ]
+            graph_path = next((path for path in graph_candidates if path and path.exists()), None)
+            
+            EXPECTED_GRAPH_SHA256 = runtime_settings.graph.graph_sha256
+            
+            if graph_path:
+                file_bytes = await asyncio.to_thread(_read_file_bytes, graph_path)
+                actual_hash = hashlib.sha256(file_bytes).hexdigest()
+                
+                if not EXPECTED_GRAPH_SHA256:
+                    raise RuntimeError(
+                        "Critical Security Alert: AEGIS_GRAPH_SHA256 env var is unset. "
+                        "Halting boot to prevent loading an unverified graph artifact."
+                    )
+                if actual_hash != EXPECTED_GRAPH_SHA256:
+                    raise RuntimeError(
+                        f"Critical Security Alert: {graph_path} hash mismatch. Halting boot.\n"
+                        f"Expected: {EXPECTED_GRAPH_SHA256}\n"
+                        f"Actual:   {actual_hash}"
+                    )
+                
+                if graph_path.suffix.lower() != ".graphml":
+                    raise ValueError(
+                        f"Unsupported graph artifact format: {graph_path.suffix}. "
+                        "Only .graphml is accepted."
+                    )
+                state.transaction_graph = nx.parse_graphml(file_bytes.decode("utf-8"))
+                startup_logger.info(
+                    "Loaded transaction graph",
+                    event_type="graph_loaded",
+                    metadata={
+                        "path": str(graph_path),
+                        "nodes": state.transaction_graph.number_of_nodes(),
+                        "edges": state.transaction_graph.number_of_edges(),
+                    },
+                )
+                print(f"✓ Loaded verified transaction graph: {state.transaction_graph.number_of_nodes()} nodes, "
+                      f"{state.transaction_graph.number_of_edges()} edges")
+                state.graph_loaded = True
+            else:
+                startup_logger.warning(
+                    "Graph file not found at data/synthetic/graph.graphml",
+                    event_type="graph_missing",
+                )
+                print("⚠ Graph file not found at data/synthetic/graph.graphml")
+            
+            if not graph_path:
+                state.graph_loaded = False
 
         # Load fraud chains
         chains_path = Path("data/synthetic/fraud_chains.json")
@@ -851,8 +1243,12 @@ def _initialize_innovation_runtime(startup_logger):
     if INNOVATIONS_AVAILABLE:
         try:
             voice_analyzer = VoiceStressAnalyzer()
+            state.runtime.health_monitor.register_service("voice_analyzer")
+            state.runtime.health_monitor.mark_healthy("voice_analyzer")
             startup_logger.info("Voice Stress Analyzer initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("voice_analyzer")
+            state.runtime.health_monitor.mark_failed("voice_analyzer", error=str(e))
             startup_logger.warning(
                 f"Voice analyzer initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -860,8 +1256,12 @@ def _initialize_innovation_runtime(startup_logger):
 
         try:
             mule_scorer = PredictiveMuleScorer()
+            state.runtime.health_monitor.register_service("mule_scorer")
+            state.runtime.health_monitor.mark_healthy("mule_scorer")
             startup_logger.info("Predictive Mule Scorer initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("mule_scorer")
+            state.runtime.health_monitor.mark_failed("mule_scorer", error=str(e))
             startup_logger.warning(
                 f"Mule scorer initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -869,8 +1269,12 @@ def _initialize_innovation_runtime(startup_logger):
 
         try:
             honeypot_manager = HoneypotEscrowManager()
+            state.runtime.health_monitor.register_service("honeypot_manager")
+            state.runtime.health_monitor.mark_healthy("honeypot_manager")
             startup_logger.info("Honeypot Escrow Manager initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("honeypot_manager")
+            state.runtime.health_monitor.mark_failed("honeypot_manager", error=str(e))
             startup_logger.warning(
                 f"Honeypot manager initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -878,8 +1282,12 @@ def _initialize_innovation_runtime(startup_logger):
 
         try:
             blockchain_manager = BlockchainEvidenceManager()
+            state.runtime.health_monitor.register_service("blockchain_manager")
+            state.runtime.health_monitor.mark_healthy("blockchain_manager")
             startup_logger.info("Blockchain Evidence Manager initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("blockchain_manager")
+            state.runtime.health_monitor.mark_failed("blockchain_manager", error=str(e))
             startup_logger.warning(
                 f"Blockchain manager initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -887,8 +1295,12 @@ def _initialize_innovation_runtime(startup_logger):
 
         try:
             aegis_oracle = AegisOracleExplainer()
+            state.runtime.health_monitor.register_service("aegis_oracle")
+            state.runtime.health_monitor.mark_healthy("aegis_oracle")
             startup_logger.info("Aegis-Oracle Explainer initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("aegis_oracle")
+            state.runtime.health_monitor.mark_failed("aegis_oracle", error=str(e))
             startup_logger.warning(
                 f"Aegis-Oracle initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -899,8 +1311,12 @@ def _initialize_innovation_runtime(startup_logger):
             state.lateral_movement_detector = LateralMovementDetector()
             state.services.register_service("lateral_movement_detector", state.lateral_movement_detector, replace=True)
             lateral_movement_detector = state.lateral_movement_detector
+            state.runtime.health_monitor.register_service("lateral_movement_detector")
+            state.runtime.health_monitor.mark_healthy("lateral_movement_detector")
             startup_logger.info("Lateral Movement Detector initialized", event_type="innovation_ready")
         except Exception as e:
+            state.runtime.health_monitor.register_service("lateral_movement_detector")
+            state.runtime.health_monitor.mark_failed("lateral_movement_detector", error=str(e))
             startup_logger.warning(
                 f"Lateral movement initialization failed: {e}",
                 event_type="innovation_init_failed",
@@ -917,6 +1333,7 @@ def _initialize_innovation_runtime(startup_logger):
         aegis_oracle=aegis_oracle,
         lateral_movement_detector=lateral_movement_detector,
     )
+
 
 
 def _startup_ready(startup_logger):
@@ -1054,10 +1471,40 @@ async def lifespan(app: FastAPI):
     Application lifespan. Initializes services through the runtime lifecycle
     manager and cancels registered background tasks cleanly on shutdown.
     """
+    def _close_neo4j_provider():
+        if hasattr(state.transaction_graph, "close") and callable(state.transaction_graph.close):
+            state.transaction_graph.close()
+
     startup_logger = get_logger("api.startup")
     lifecycle_manager = LifecycleManager(state.runtime, logger=startup_logger)
     state.services.register_service("lifecycle_manager", lifecycle_manager, replace=True)
     app.state.runtime = state.runtime
+
+    # Set up recovery manager and watchdog
+    recovery_manager = RecoveryManager(state.runtime.health_monitor)
+    watchdog = RuntimeWatchdog(
+        health_monitor=state.runtime.health_monitor,
+        task_registry=state.tasks,
+        recovery_manager=recovery_manager,
+    )
+    state.runtime.recovery_manager = recovery_manager
+    state.runtime.watchdog = watchdog
+
+    def restart_honeypot_task():
+        for task in list(state.tasks._tasks.keys()):
+            if state.tasks._tasks[task].name == "honeypot_auto_release" and not task.done():
+                task.cancel()
+        state.tasks.register_task(
+            _honeypot_auto_release_loop(),
+            name="honeypot_auto_release",
+            owner="innovation.honeypot",
+        )
+
+    recovery_manager.register_recovery_callback(
+        "honeypot_auto_release",
+        restart_honeypot_task,
+        max_attempts=3
+    )
 
     lifecycle_manager.register_startup("startup_banner", _startup_banner, critical=False)
     lifecycle_manager.register_startup(
@@ -1088,7 +1535,14 @@ async def lifespan(app: FastAPI):
         _start_runtime_background_tasks,
         critical=False,
     )
+    lifecycle_manager.register_startup(
+        "start_watchdog",
+        lambda: watchdog.start(interval_seconds=10.0),
+        critical=False,
+    )
     lifecycle_manager.register_shutdown("stop_background_tasks", _stop_runtime_background_tasks)
+    lifecycle_manager.register_shutdown("close_neo4j_provider", _close_neo4j_provider)
+    lifecycle_manager.register_shutdown("stop_watchdog", watchdog.stop)
 
     await lifecycle_manager.startup()
     try:
@@ -2061,13 +2515,17 @@ async def export_legal_evidence(
         )
 
         loop = asyncio.get_running_loop()
+        # Derive a verified authority from the validated token
+        token = _extract_legal_export_token(authorization, x_legal_export_token)
+        # In a real system, map token to authority identity; here we use the token string directly
+        verified_authority = token if token else "unknown_authority"
         result = await loop.run_in_executor(
             None,
             partial(
                 state.blockchain_manager.export_for_legal_proceedings,
                 evidence_id=export_request.evidence_id,
                 case_number=export_request.case_number,
-                requesting_authority=export_request.requesting_authority,
+                requesting_authority=verified_authority,
             ),
         )
         if 'error' in result:
