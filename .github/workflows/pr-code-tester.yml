@@ -3,7 +3,10 @@ name: "PR Dynamic Code Verifier"
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
-
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+  
 jobs:
   verify-changes:
     runs-on: ubuntu-latest
