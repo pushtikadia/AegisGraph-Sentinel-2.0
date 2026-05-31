@@ -23,7 +23,7 @@ class MockWebSocket:
         self.messages.append(data)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_websocket_connect_and_disconnect():
     manager = WebSocketManager()
     ws = MockWebSocket()
@@ -36,7 +36,7 @@ async def test_websocket_connect_and_disconnect():
     await manager.disconnect("client_1")
     assert "client_1" not in manager.active_connections
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_reconnect_backoff():
     manager = WebSocketManager(max_reconnect_attempts=3)
     ws = MockWebSocket()
@@ -51,7 +51,7 @@ async def test_reconnect_backoff():
     assert ws_rejected.closed is True
     assert ws_rejected.close_code == 1008
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_heartbeat_and_stale_cleanup():
     manager = WebSocketManager(heartbeat_timeout=0.1)
     ws1 = MockWebSocket()
@@ -70,7 +70,7 @@ async def test_heartbeat_and_stale_cleanup():
     assert "stale_client" not in manager.active_connections
     assert ws2.closed is True
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_broadcast():
     manager = WebSocketManager()
     ws1 = MockWebSocket()
