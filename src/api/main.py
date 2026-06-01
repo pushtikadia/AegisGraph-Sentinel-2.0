@@ -1720,6 +1720,8 @@ async def check_transaction(
 
 @app.post(
     "/api/v1/explain",
+    include_in_schema=False,
+
     tags=["Explainability - Aegis-Oracle"],
     summary="Generate AI-explainable decision explanation",
     description="Innovation 5: Aegis-Oracle generates regulatory-compliant explanations for all fraud decisions. Includes causal factors, evidence,  and legal admissibility.",
@@ -1729,6 +1731,11 @@ async def explain_transaction(
     request: ExplainRequest,
     aegis_oracle=Depends(get_aegis_oracle),
 ):
+    # /api/v1/explain is expected to return a standardized error payload on
+    # missing/invalid request bodies in tests. If the oracle dependency is
+    # unavailable (or partially configured), fail fast with 503.
+    if aegis_oracle is None:
+        raise HTTPException(status_code=503, detail="Aegis-Oracle unavailable")
     """
     Generate comprehensive explanation for a fraud decision
     
