@@ -70,10 +70,7 @@ def _load_yaml(path: Path, *, optional: bool = True) -> Dict[str, Any]:
     return data
 
 
-def load_environment(
-    environ: Optional[Mapping[str, str]] = None,
-) -> EnvironmentVariablesSchema:
-    """Load recognized environment variables into a typed raw schema."""
+
 def load_environment(
     environ: Optional[Mapping[str, str]] = None,
 ) -> EnvironmentVariablesSchema:
