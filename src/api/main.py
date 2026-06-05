@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from importlib import import_module, util as importlib_util
 from contextlib import asynccontextmanager
@@ -286,6 +287,12 @@ from ..core import register_core_services, register_graph_services, register_inn
 _api_logger = get_logger("api")
 _audit_logger = get_audit_logger()
 settings = get_settings()
+
+# Allowlist pattern for WebSocket client_id path parameter.
+# Only alphanumeric characters, hyphens, and underscores are permitted,
+# with a maximum length of 64 characters, to prevent log injection and
+# memory exhaustion via crafted path values.
+_WS_CLIENT_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 
 class FraudDecision(str, Enum):
@@ -1954,6 +1961,18 @@ async def fraud_stream_websocket(websocket: WebSocket, client_id: str):
     Accepts WebSocket connections and streams fraud decisions.
     Requires periodic 'ping' messages as heartbeats.
     """
+    # Validate client_id before accepting the connection.
+    # Rejects values that are empty, overly long (>64 chars), or contain
+    # characters that could cause log injection or memory exhaustion.
+    if not _WS_CLIENT_ID_RE.match(client_id):
+        _api_logger.warning(
+            "WebSocket connection rejected: invalid client_id format",
+            event_type="ws_invalid_client_id",
+            metadata={"client_id_length": len(client_id)},
+        )
+        await websocket.close(code=1008, reason="Invalid client_id: use alphanumeric, hyphens, or underscores (max 64 chars)")
+        return
+
     try:
         require_role(Role.ANALYST)(websocket.headers.get("X-API-Key"))
     except HTTPException:
