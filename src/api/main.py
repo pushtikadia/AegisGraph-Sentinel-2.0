@@ -326,10 +326,11 @@ settings = get_settings()
 _WS_CLIENT_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 # Context variables for batch-scoped subgraph cache (shared across concurrent scorers)
-_batch_subgraph_cache: ContextVar[Optional[Dict]] = ContextVar(
+# Type annotations use Any to avoid Pydantic/FastAPI trying to validate Lock type
+_batch_subgraph_cache: ContextVar[Any] = ContextVar(
     '_batch_subgraph_cache', default=None
 )
-_batch_subgraph_lock: ContextVar[Optional[Lock]] = ContextVar(
+_batch_subgraph_lock: ContextVar[Any] = ContextVar(
     '_batch_subgraph_lock', default=None
 )
 
