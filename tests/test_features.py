@@ -452,5 +452,50 @@ class TestPredictiveMuleCache:
         assert scorer.device_history["shared_device"] == 3
 
 
+    def test_update_cache_timezone_aware_no_type_error(self):
+        """Timezone-aware opening_timestamp must not raise TypeError in _update_cache."""
+        from datetime import datetime, timezone
+        from src.features.predictive_mule_identification import (
+            AccountOpeningData,
+            PredictiveMuleScorer,
+        )
+
+        scorer = PredictiveMuleScorer()
+        aware_ts = datetime.now(timezone.utc)
+        data = AccountOpeningData(
+            opening_timestamp=aware_ts,
+            form_start_time=aware_ts,
+            form_submit_time=aware_ts,
+            name="test", age=25, profession="student", stated_address="Delhi",
+            email="test@example.com", phone_number="9999999999",
+            kyc_document_type="PAN", facial_match_score=0.9,
+            document_quality_score=0.9, ip_address="1.2.3.4",
+            device_id="DEV_TEST", device_age_days=10,
+            browser_fingerprint="fp_test", referrer_url=None,
+            initial_deposit=1000.0, account_type="savings", referral_code=None,
+            existing_customer_connections=0,
+        )
+        # Must not raise TypeError: can't compare offset-naive and offset-aware datetimes
+        scorer._update_cache(data)
+
+    def test_score_account_opening_kwargs_uses_aware_defaults(self):
+        """score_account_opening kwargs path defaults must be timezone-aware."""
+        from datetime import timezone
+        from src.features.predictive_mule_identification import PredictiveMuleScorer
+
+        scorer = PredictiveMuleScorer()
+        # Calling with no explicit timestamps should not raise TypeError
+        result = scorer.score_account_opening(
+            name="test", age=25, profession="student",
+            stated_address="Mumbai", email="t@t.com",
+            phone="9876543210", document_type="PAN",
+            facial_match=0.8, ip_address="10.0.0.1",
+            device_id="DEV1", device_age_days=5,
+            browser_fingerprint="fp", initial_deposit=500.0,
+            account_type="savings",
+        )
+        assert "risk_score" in result
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
