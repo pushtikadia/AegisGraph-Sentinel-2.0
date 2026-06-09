@@ -9,6 +9,7 @@ Example:
     high_risk_account (0.95) -> shared_device (0.75) -> connected_accounts (0.60)
 """
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple, Any
