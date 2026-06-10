@@ -20,7 +20,8 @@ class IdentityProviderRegistry:
     def register_provider(self, name: str, provider_type: IdentityProviderType, issuer: str,
                           sso_provider: Optional[SSOProvider] = None, client_id: Optional[str] = None,
                           client_secret: Optional[str] = None, metadata_url: Optional[str] = None, **kwargs) -> IdentityProvider:
-        provider_id = hashlib.sha256(f"{issuer}:{provider_type.value}".encode()).hexdigest()[:16]
+        pt_value = provider_type.value if hasattr(provider_type, 'value') else provider_type
+        provider_id = hashlib.sha256(f"{issuer}:{pt_value}".encode()).hexdigest()[:16]
         provider = IdentityProvider(id=provider_id, name=name, provider_type=provider_type, sso_provider=sso_provider,
                                     issuer=issuer, metadata_url=metadata_url, client_id=client_id,
                                     client_secret=client_secret, attribute_mappings=self.DEFAULT_ATTR_MAPPINGS.copy(), **kwargs)
