@@ -9,8 +9,8 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer, HTTPBearer
 from typing import Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel, EmailStr, Field
-import secrets
 
+from src.config import settings
 from src.saas.auth.service import (
     AuthProvider,
     AuthService,
@@ -94,9 +94,11 @@ class APIKeyResponse(BaseModel):
     created_at: datetime
 
 
-# Initialize auth service
+# Initialize auth service using the application's stable SECRET_KEY so that
+# tokens survive process restarts and remain valid across multiple workers.
+_jwt_secret = settings.SECRET_KEY.get_secret_value()
 auth_service = AuthService({
-    "jwt_secret": secrets.token_hex(32),
+    "jwt_secret": _jwt_secret,
     "access_token_expiry": 3600,
     "refresh_token_expiry": 86400 * 7,
 })
