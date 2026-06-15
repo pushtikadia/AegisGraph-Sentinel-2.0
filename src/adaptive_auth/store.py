@@ -85,7 +85,7 @@ class AdaptiveAuthStore:
         self._profiles: LRUCache = LRUCache(maxsize=max_profiles)
         self._policies: Dict[str, AuthorizationPolicy] = {}
         self._decisions: LRUCache = LRUCache(maxsize=max_sessions)
-        self._challenges: Dict[str, StepUpChallenge] = {}
+        self._challenges: LRUCache = LRUCache(maxsize=50000)
         self._lock = threading.RLock()
         
         # Initialize default policies
@@ -304,6 +304,16 @@ class AdaptiveAuthStore:
                     challenges.append(challenge)
         return challenges
     
+    def cleanup_expired_challenges(self) -> int:
+        """Remove expired challenges. Returns count removed."""
+        expired = [
+            cid for cid, c in list(self._challenges.items())
+            if c.is_expired() or c.status in ("completed", "failed", "cancelled", "expired")
+        ]
+        for cid in expired:
+            self._challenges.pop(cid, None)
+        return len(expired)
+
     # Decision Storage
     def store_decision(self, decision: AuthenticationDecision) -> None:
         """Store an authentication decision."""
