@@ -141,8 +141,9 @@ class AdaptiveAuthStore:
             trust=trust,
         )
         
-        self._sessions[session_id] = session
-        self._user_sessions[user_id].add(session_id)
+        with self._lock:
+            self._sessions[session_id] = session
+            self._user_sessions[user_id].add(session_id)
         return session
 
     def get_session(self, session_id: str) -> Optional[AuthenticationSession]:
@@ -166,36 +167,39 @@ class AdaptiveAuthStore:
     
     def terminate_session(self, session_id: str, reason: str = "") -> bool:
         """Terminate a session."""
-        session = self._sessions.get(session_id)
-        if session:
-            session.status = SessionStatus.TERMINATED
-            session.metadata["termination_reason"] = reason
-            session.metadata["terminated_at"] = datetime.now(timezone.utc).isoformat()
-            self._user_sessions.get(session.user_id, set()).discard(session_id)
-            return True
-        return False
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.status = SessionStatus.TERMINATED
+                session.metadata["termination_reason"] = reason
+                session.metadata["terminated_at"] = datetime.now(timezone.utc).isoformat()
+                self._user_sessions.get(session.user_id, set()).discard(session_id)
+                return True
+            return False
     
     def get_user_sessions(self, user_id: str) -> List[AuthenticationSession]:
         """Get all active sessions for a user."""
         now = datetime.now(timezone.utc)
         sessions = []
-        for session_id in list(self._user_sessions.get(user_id, set())):
-            session = self._sessions.get(session_id)
-            if session and session.status == SessionStatus.ACTIVE and session.expires_at > now:
-                sessions.append(session)
+        with self._lock:
+            for session_id in list(self._user_sessions.get(user_id, set())):
+                session = self._sessions.get(session_id)
+                if session and session.status == SessionStatus.ACTIVE and session.expires_at > now:
+                    sessions.append(session)
         return sessions
 
     def cleanup_expired_sessions(self) -> int:
         """Remove expired sessions. Returns count of removed sessions."""
         now = datetime.now(timezone.utc)
-        expired = [
-            (sid, s) for sid, s in list(self._sessions.items())
-            if s.expires_at <= now
-        ]
-        for session_id, session in expired:
-            del self._sessions[session_id]
-            self._user_sessions.get(session.user_id, set()).discard(session_id)
-        return len(expired)
+        with self._lock:
+            expired = [
+                (sid, s) for sid, s in list(self._sessions.items())
+                if s.expires_at <= now
+            ]
+            for session_id, session in expired:
+                del self._sessions[session_id]
+                self._user_sessions.get(session.user_id, set()).discard(session_id)
+            return len(expired)
     
     def get_active_session_ids(self) -> List[str]:
         """Return a snapshot of active, non-expired session IDs."""
