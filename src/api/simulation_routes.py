@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Header, Query
 from pydantic import BaseModel, Field, field_validator
 
+from src.api.security import verify_api_key
 from src.threat_simulation import (
     ThreatSimulator,
     get_threat_simulator,
@@ -60,13 +61,6 @@ class StartSimulationRequest(BaseModel):
 class CompleteSimulationRequest(BaseModel):
     """Request to complete a simulation."""
     results: Optional[Dict[str, Any]] = None
-
-
-def verify_api_key(x_api_key: str = Header(None)) -> str:
-    """Verify API key."""
-    if x_api_key != "SUPER_ADMIN":
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return x_api_key
 
 
 @router.get("/health")
